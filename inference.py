@@ -21,11 +21,14 @@ def compute_bpp(out_net):
               for likelihoods in out_net['likelihoods'].values()).item()
 
 def parse_args():
-    input_img = 'input.png'
-    output_img = 'output.png'
+    input_img = '/tmp2/loijilai/compguard/dataset/train/frame_0.bmp'
+    output_img = '/tmp2/loijilai/compguard/outputs/output.png'
+    checkpoint = ''
     parser = argparse.ArgumentParser(description='Compress images using learned image compression models')
     parser.add_argument('--input', type=str, default=input_img, help='input image')
     parser.add_argument('--output', type=str, default=output_img, help='output image')
+    parser.add_argument('--checkpoint', type=str, default=checkpoint, help='path to the model checkpoint')
+    parser.add_argument('--quality', type=int, default=2, help='compression quality')
     args = parser.parse_args()
     return args
 
@@ -41,7 +44,12 @@ def main():
 
     img = Image.open(args.input).convert('RGB')
     x = transforms.ToTensor()(img).unsqueeze(0).to(device)
-    net = bmshj2018_factorized(quality=2, pretrained=True).eval().to(device)     
+    if(args.checkpoint is None):
+        net = bmshj2018_factorized(quality=args.quality, pretrained=True).eval().to(device)     
+    else:
+        net = bmshj2018_factorized(quality=args.quality, pretrained=False).eval().to(device)     
+        checkpoint = torch.load(args.checkpoint, map_location=device)
+        net.load_state_dict(checkpoint['state_dict'])
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     with torch.no_grad():

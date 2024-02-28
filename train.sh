@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=3 python train.py -d /tmp2/loijilai/compguard/dataset --batch-size 16 -lr 1e-4 --save --cuda --epoch 3

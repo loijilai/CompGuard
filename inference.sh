@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=3 python inference.py --checkpoint /tmp2/loijilai/compguard/checkpoints/checkpoint_best_loss.pth.tar
