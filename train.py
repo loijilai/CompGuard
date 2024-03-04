@@ -149,9 +149,13 @@ def test_epoch(epoch, test_dataloader, model, criterion):
     return loss.avg
 
 
-def save_checkpoint(state, is_best, dirname):
-    filename = f"{dirname}/checkpoint.pth.tar"
-    best_filename = f"{dirname}/checkpoint_best_loss.pth.tar"
+def save_checkpoint(state, is_best, dirname, pretrained):
+    if pretrained:
+        filename = f"{dirname}/checkpoint_pretrained.pth.tar"
+        best_filename = f"{dirname}/checkpoint_pretrained_best_loss.pth.tar"
+    else:
+        filename = f"{dirname}/checkpoint.pth.tar"
+        best_filename = f"{dirname}/checkpoint_best_loss.pth.tar"
     torch.save(state, filename)
     if is_best:
         shutil.copyfile(filename, best_filename)
@@ -159,8 +163,9 @@ def save_checkpoint(state, is_best, dirname):
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(description="Example training script.")
-    dataset = "/tmp2/loijilai/compguard/dataset"
-    ckpt_output = "/tmp2/loijilai/compguard/checkpoints"
+    dataset = None
+    ckpt_outdir = None
+    # Model
     parser.add_argument(
         "-m",
         "--model",
@@ -168,11 +173,39 @@ def parse_args(argv):
         choices=image_models.keys(),
         help="Model architecture (default: %(default)s)",
     )
+    parser.add_argument("--quality", type=int, default=2, help="Quality setting for the model")
+    parser.add_argument("--pretrained", action="store_true", help="Use pre-trained model")
+    parser.add_argument("--checkpoint", type=str, help="Path to a checkpoint")
+
+    # Dataset
     parser.add_argument(
         "-d", "--dataset", type=str, default=dataset, required=True, help="Training dataset"
     )
-    parser.add_argument("--ckpt-output", type=str, default=ckpt_output, help="Output checkpoint file")
-    parser.add_argument("--quality", type=int, default=2, help="Quality setting for the model")
+    parser.add_argument(
+        "-n",
+        "--num_workers",
+        type=int,
+        default=4,
+        help="Dataloaders threads (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--batch_size", type=int, default=16, help="Batch size (default: %(default)s)"
+    )
+    parser.add_argument(
+        "--test_batch_size",
+        type=int,
+        default=64,
+        help="Test batch size (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--patch_size",
+        type=int,
+        nargs=2,
+        default=(256, 256),
+        help="Size of the patches to be cropped (default: %(default)s)",
+    )
+
+    # Training hyperparameters
     parser.add_argument(
         "-e",
         "--epochs",
@@ -182,59 +215,38 @@ def parse_args(argv):
     )
     parser.add_argument(
         "-lr",
-        "--learning-rate",
+        "--learning_rate",
         default=1e-4,
         type=float,
         help="Learning rate (default: %(default)s)",
     )
     parser.add_argument(
-        "-n",
-        "--num-workers",
-        type=int,
-        default=4,
-        help="Dataloaders threads (default: %(default)s)",
-    )
-    parser.add_argument(
-        "--lambda",
-        dest="lmbda",
-        type=float,
-        default=1e-2,
-        help="Bit-rate distortion parameter (default: %(default)s)",
-    )
-    parser.add_argument(
-        "--batch-size", type=int, default=16, help="Batch size (default: %(default)s)"
-    )
-    parser.add_argument(
-        "--test-batch-size",
-        type=int,
-        default=64,
-        help="Test batch size (default: %(default)s)",
-    )
-    parser.add_argument(
-        "--aux-learning-rate",
+        "--aux_learning_rate",
         type=float,
         default=1e-3,
         help="Auxiliary loss learning rate (default: %(default)s)",
     )
     parser.add_argument(
-        "--patch-size",
-        type=int,
-        nargs=2,
-        default=(256, 256),
-        help="Size of the patches to be cropped (default: %(default)s)",
+        "--lambda",
+        dest="lmbda", # lambda is a reserved keyword
+        type=float,
+        default=1e-2,
+        help="Bit-rate distortion parameter (default: %(default)s)",
     )
-    parser.add_argument("--cuda", action="store_true", default=True, help="Use cuda")
-    parser.add_argument(
-        "--save", action="store_true", default=True, help="Save model to disk"
-    )
-    parser.add_argument("--seed", type=int, default=0, help="Set random seed for reproducibility")
     parser.add_argument(
         "--clip_max_norm",
         default=1.0,
         type=float,
         help="gradient clipping max norm (default: %(default)s",
     )
-    parser.add_argument("--checkpoint", type=str, help="Path to a checkpoint")
+
+    # Environment
+    parser.add_argument(
+        "--save", action="store_true", default=True, help="Save model to disk"
+    )
+    parser.add_argument("--ckpt_outdir", type=str, default=ckpt_outdir, help="Output checkpoint directory")
+    parser.add_argument("--seed", type=int, default=0, help="Set random seed for reproducibility")
+
     args = parser.parse_args(argv)
     return args
 
@@ -257,7 +269,7 @@ def main(argv):
     train_dataset = ImageFolder(args.dataset, split="train", transform=train_transforms)
     test_dataset = ImageFolder(args.dataset, split="test", transform=test_transforms)
 
-    device = "cuda" if args.cuda and torch.cuda.is_available() else "cpu"
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
     train_dataloader = DataLoader(
         train_dataset,
@@ -275,10 +287,10 @@ def main(argv):
         pin_memory=(device == "cuda"),
     )
 
-    net = image_models[args.model](quality=args.quality, pretrained=True)
+    net = image_models[args.model](quality=args.quality, pretrained=args.pretrained)
     net = net.to(device)
 
-    if args.cuda and torch.cuda.device_count() > 1:
+    if torch.cuda.device_count() > 1:
         net = CustomDataParallel(net)
 
     optimizer, aux_optimizer = configure_optimizers(net, args)
@@ -314,6 +326,7 @@ def main(argv):
         best_loss = min(loss, best_loss)
 
         if args.save:
+            print("Saving checkpoint")
             save_checkpoint(
                 {
                     "epoch": epoch,
@@ -324,8 +337,10 @@ def main(argv):
                     "lr_scheduler": lr_scheduler.state_dict(),
                 },
                 is_best,
-                dirname=f"{args.ckpt_output}",
+                dirname=f"{args.ckpt_outdir}",
+                pretrained=args.pretrained,
             )
+        print(f"Training finish! \tBest loss: {best_loss:.4f}")
 
 
 if __name__ == "__main__":

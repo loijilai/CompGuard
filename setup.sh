@@ -1,3 +1,9 @@
 mkdir checkpoints
+mkdir checkpoints/factorized
+mkdir checkpoints/hyperprior
 mkdir dataset
+mkdir dataset/test
+mkdir dataset/train
 mkdir outputs
+mkdir outputs/factorized
+mkdir outputs/hyperprior
